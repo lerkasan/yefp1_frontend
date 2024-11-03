@@ -1,0 +1,44 @@
+name: CI/CD for Frontend
+
+on:
+  push:
+    branches:
+      - main
+  
+  # for debugging purposes
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  WEBSITE_S3_BUCKET_NAME: ${{ vars.WEBSITE_S3_BUCKET_NAME }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} 
+
+jobs:
+
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ vars.ENVIRONMENT }}
+    permissions:
+      contents: read
+      id-token: write       # For GitHub OIDC Token
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   #v4.2.2
+
+      - name: Check for commited secrets using GitLeaks
+        uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3   #v2.3.7
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502   # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.FRONTEND_ROLE }}
+          role-session-name: yefp1-fe-${{ github.sha }}-${{ github.run_id}}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync --region ${{ env.AWS_REGION }} templates/ s3://${{ env.WEBSITE_S3_BUCKET_NAME }}/
+          aws s3 cp --region ${{ env.AWS_REGION }} config.json s3://${{ env.WEBSITE_S3_BUCKET_NAME }}/
+
+      - name: Invalidate CloudFront Cache
+        run: aws cloudfront --region ${{ env.AWS_REGION }} create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*" "/"
